@@ -2,9 +2,9 @@ import { DISEASES } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
-import { Eye, Activity, Scan, CircleDot, Brain } from 'lucide-react';
+import { Eye, Activity, Scan, CircleDot, Brain, HeartPulse, GitBranch, Droplets, Sparkles, Focus } from 'lucide-react';
 
-const iconMap: Record<string, any> = { Eye, Activity, Scan, CircleDot };
+const iconMap: Record<string, any> = { Eye, Activity, Scan, CircleDot, HeartPulse, GitBranch, Droplets, Sparkles, Focus };
 
 export default function Diseases() {
   return (

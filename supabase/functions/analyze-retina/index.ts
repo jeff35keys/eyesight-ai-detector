@@ -11,6 +11,11 @@ const DISEASES = [
   "Glaucoma",
   "Age-related Macular Degeneration",
   "Cataracts",
+  "Hypertensive Retinopathy",
+  "Retinal Vein Occlusion",
+  "Macular Edema",
+  "Retinitis Pigmentosa",
+  "Pathological Myopia",
 ];
 
 Deno.serve(async (req) => {
@@ -39,15 +44,12 @@ Deno.serve(async (req) => {
       ? imageBase64
       : `data:${mimeType || "image/jpeg"};base64,${imageBase64}`;
 
-    const systemPrompt = `You are an ophthalmology AI assistant simulating a CNN-based retinal fundus image classifier. Analyze the provided fundus image and produce confidence scores (0.0-1.0) for the four conditions: Diabetic Retinopathy, Glaucoma, Age-related Macular Degeneration, and Cataracts. Mark a disease as "detected" if confidence > 0.5. Determine an overall severity in {Normal, Mild, Moderate, Severe, Proliferative} and an overall risk percentage 0-100. IMPORTANT: This is for educational/research demonstration only — not medical advice.`;
+    const systemPrompt = `You are an ophthalmology AI assistant simulating a CNN-based retinal fundus image classifier. Analyze the provided fundus image and produce confidence scores (0.0-1.0) for each of these conditions: ${DISEASES.join(", ")}. Mark a disease as "detected" if confidence > 0.5. Determine an overall severity in {Normal, Mild, Moderate, Severe, Proliferative} and an overall risk percentage 0-100. IMPORTANT: This is for educational/research demonstration only — not medical advice.`;
 
     const userPrompt = `Analyze this retinal fundus image and return a JSON object with this exact schema:
 {
   "predictions": [
-    {"disease": "Diabetic Retinopathy", "confidence": number, "detected": boolean},
-    {"disease": "Glaucoma", "confidence": number, "detected": boolean},
-    {"disease": "Age-related Macular Degeneration", "confidence": number, "detected": boolean},
-    {"disease": "Cataracts", "confidence": number, "detected": boolean}
+${DISEASES.map((d) => `    {"disease": "${d}", "confidence": number, "detected": boolean}`).join(",\n")}
   ],
   "severity": "Normal" | "Mild" | "Moderate" | "Severe" | "Proliferative",
   "overallRisk": number,
