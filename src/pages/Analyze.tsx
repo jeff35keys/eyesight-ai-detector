@@ -90,11 +90,9 @@ export default function Analyze() {
 
         {result && <ResultsDisplay result={result} />}
 
-        {!import.meta.env.VITE_ML_API_ENDPOINT && (
-          <p className="text-xs text-center text-muted-foreground mt-6">
-            ⚠️ No ML API endpoint configured. Running simulated predictions. Set <code className="bg-muted px-1 rounded">VITE_ML_API_ENDPOINT</code> to connect your model.
-          </p>
-        )}
+        <p className="text-xs text-center text-muted-foreground mt-6">
+          Powered by Lovable AI (Gemini multimodal). For educational/research use only — not medical advice.
+        </p>
       </motion.div>
     </div>
   );

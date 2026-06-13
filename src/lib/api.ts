@@ -1,45 +1,46 @@
 import { PredictionResult, DiseasePrediction } from './types';
+import { supabase } from '@/integrations/supabase/client';
 
-const API_ENDPOINT = import.meta.env.VITE_ML_API_ENDPOINT || '';
+async function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export async function analyzeImage(imageFile: File): Promise<PredictionResult> {
-  if (API_ENDPOINT) {
-    const formData = new FormData();
-    formData.append('image', imageFile);
+  const imageBase64 = await fileToBase64(imageFile);
 
-    const response = await fetch(API_ENDPOINT, {
-      method: 'POST',
-      body: formData,
-    });
+  const { data, error } = await supabase.functions.invoke('analyze-retina', {
+    body: {
+      imageBase64,
+      imageName: imageFile.name,
+      mimeType: imageFile.type,
+    },
+  });
 
-    if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
-    }
-
-    return await response.json();
+  if (error) {
+    throw new Error(error.message || 'AI analysis failed');
+  }
+  if (data?.error) {
+    throw new Error(data.error);
   }
 
-  // Simulated prediction when no API endpoint is configured
-  await new Promise((resolve) => setTimeout(resolve, 2500));
-
-  const predictions: DiseasePrediction[] = [
-    { disease: 'Diabetic Retinopathy', confidence: Math.random() * 0.6 + 0.2, detected: Math.random() > 0.4 },
-    { disease: 'Glaucoma', confidence: Math.random() * 0.5 + 0.1, detected: Math.random() > 0.5 },
-    { disease: 'Age-related Macular Degeneration', confidence: Math.random() * 0.4 + 0.1, detected: Math.random() > 0.6 },
-    { disease: 'Cataracts', confidence: Math.random() * 0.5 + 0.15, detected: Math.random() > 0.5 },
-  ];
-
-  const detectedCount = predictions.filter((p) => p.detected).length;
-  const maxConf = Math.max(...predictions.map((p) => p.confidence));
-  const severityLevels: PredictionResult['severity'][] = ['Normal', 'Mild', 'Moderate', 'Severe', 'Proliferative'];
-  const severityIndex = Math.min(Math.floor(maxConf * 5), 4);
+  // Ensure shape conforms to PredictionResult
+  const predictions: DiseasePrediction[] = (data.predictions || []).map((p: any) => ({
+    disease: p.disease,
+    confidence: Number(p.confidence) || 0,
+    detected: !!p.detected,
+  }));
 
   return {
-    id: crypto.randomUUID(),
-    timestamp: new Date().toISOString(),
-    imageName: imageFile.name,
+    id: data.id,
+    timestamp: data.timestamp,
+    imageName: data.imageName,
     predictions,
-    severity: detectedCount === 0 ? 'Normal' : severityLevels[severityIndex],
-    overallRisk: Math.round(maxConf * 100),
+    severity: data.severity,
+    overallRisk: data.overallRisk,
   };
 }
