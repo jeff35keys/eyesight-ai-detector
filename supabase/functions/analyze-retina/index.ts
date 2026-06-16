@@ -18,21 +18,191 @@ const DISEASES = [
   "Pathological Myopia",
 ];
 
+const SYSTEM_PROMPT = `You are an ophthalmology AI assistant simulating a CNN-based retinal fundus image classifier. Analyze the provided fundus image and produce confidence scores (0.0-1.0) for each of these conditions: ${DISEASES.join(
+  ", ",
+)}. Mark a disease as "detected" if confidence > 0.5. Determine an overall severity in {Normal, Mild, Moderate, Severe, Proliferative} and an overall risk percentage 0-100. IMPORTANT: This is for educational/research demonstration only — not medical advice.`;
+
+const USER_PROMPT = `Analyze this retinal fundus image and return a JSON object with this exact schema:
+{
+  "predictions": [
+${DISEASES.map((d) => `    {"disease": "${d}", "confidence": number, "detected": boolean}`).join(",\n")}
+  ],
+  "severity": "Normal" | "Mild" | "Moderate" | "Severe" | "Proliferative",
+  "overallRisk": number,
+  "notes": "brief clinical observation"
+}
+Return ONLY valid JSON, no markdown.`;
+
+// ---------- Provider implementations ----------
+
+interface ProviderCfg {
+  url: string;
+  model: string;
+  key: string;
+  extraHeaders?: Record<string, string>;
+}
+
+async function callOpenAICompatible(cfg: ProviderCfg, dataUrl: string) {
+  const res = await fetch(cfg.url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${cfg.key}`,
+      "Content-Type": "application/json",
+      ...(cfg.extraHeaders || {}),
+    },
+    body: JSON.stringify({
+      model: cfg.model,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: USER_PROMPT },
+            { type: "image_url", image_url: { url: dataUrl } },
+          ],
+        },
+      ],
+      response_format: { type: "json_object" },
+    }),
+  });
+  return res;
+}
+
+async function callGeminiDirect(key: string, dataUrl: string, mimeType: string) {
+  const base64 = dataUrl.split(",")[1] || dataUrl;
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: `${SYSTEM_PROMPT}\n\n${USER_PROMPT}` },
+              { inline_data: { mime_type: mimeType || "image/jpeg", data: base64 } },
+            ],
+          },
+        ],
+        generationConfig: { responseMimeType: "application/json" },
+      }),
+    },
+  );
+  return res;
+}
+
+async function runProvider(
+  provider: string,
+  dataUrl: string,
+  mimeType: string,
+): Promise<{ ok: boolean; status: number; content: string; providerUsed: string }> {
+  const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+  const groqKey = Deno.env.get("GROQ_API_KEY");
+  const orKey = Deno.env.get("OPENROUTER_API_KEY");
+  const hfKey = Deno.env.get("HUGGINGFACE_API_KEY");
+  const togetherKey = Deno.env.get("TOGETHER_API_KEY");
+  const geminiKey = Deno.env.get("GEMINI_API_KEY");
+
+  let res: Response;
+  let used = provider;
+
+  switch (provider) {
+    case "groq":
+      if (!groqKey) throw new Error("GROQ_API_KEY not set");
+      res = await callOpenAICompatible(
+        {
+          url: "https://api.groq.com/openai/v1/chat/completions",
+          model: "llama-3.2-90b-vision-preview",
+          key: groqKey,
+        },
+        dataUrl,
+      );
+      break;
+    case "openrouter":
+      if (!orKey) throw new Error("OPENROUTER_API_KEY not set");
+      res = await callOpenAICompatible(
+        {
+          url: "https://openrouter.ai/api/v1/chat/completions",
+          model: "google/gemini-2.0-flash-exp:free",
+          key: orKey,
+          extraHeaders: {
+            "HTTP-Referer": "https://retinaai.app",
+            "X-Title": "RetinaAI",
+          },
+        },
+        dataUrl,
+      );
+      break;
+    case "together":
+      if (!togetherKey) throw new Error("TOGETHER_API_KEY not set");
+      res = await callOpenAICompatible(
+        {
+          url: "https://api.together.xyz/v1/chat/completions",
+          model: "meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo",
+          key: togetherKey,
+        },
+        dataUrl,
+      );
+      break;
+    case "huggingface":
+      if (!hfKey) throw new Error("HUGGINGFACE_API_KEY not set");
+      // HF router exposes an OpenAI-compatible endpoint for vision models
+      res = await callOpenAICompatible(
+        {
+          url: "https://router.huggingface.co/v1/chat/completions",
+          model: "meta-llama/Llama-3.2-11B-Vision-Instruct",
+          key: hfKey,
+        },
+        dataUrl,
+      );
+      break;
+    case "gemini":
+      if (!geminiKey) throw new Error("GEMINI_API_KEY not set");
+      res = await callGeminiDirect(geminiKey, dataUrl, mimeType);
+      break;
+    case "lovable":
+    default:
+      used = "lovable";
+      if (!lovableKey) throw new Error("LOVABLE_API_KEY not set");
+      res = await callOpenAICompatible(
+        {
+          url: "https://ai.gateway.lovable.dev/v1/chat/completions",
+          model: "google/gemini-2.5-flash",
+          key: lovableKey,
+        },
+        dataUrl,
+      );
+      break;
+  }
+
+  const text = await res.text();
+  let content = "";
+  if (res.ok) {
+    try {
+      const j = JSON.parse(text);
+      // Gemini direct shape
+      if (provider === "gemini") {
+        content = j.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+      } else {
+        content = j.choices?.[0]?.message?.content ?? "{}";
+      }
+    } catch {
+      content = text;
+    }
+  } else {
+    content = text;
+  }
+  return { ok: res.ok, status: res.status, content, providerUsed: used };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return new Response(JSON.stringify({ error: "Missing LOVABLE_API_KEY" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const { imageBase64, imageName, mimeType } = await req.json();
+    const { imageBase64, imageName, mimeType, provider: requestedProvider } = await req.json();
     if (!imageBase64) {
       return new Response(JSON.stringify({ error: "imageBase64 is required" }), {
         status: 400,
@@ -44,78 +214,62 @@ Deno.serve(async (req) => {
       ? imageBase64
       : `data:${mimeType || "image/jpeg"};base64,${imageBase64}`;
 
-    const systemPrompt = `You are an ophthalmology AI assistant simulating a CNN-based retinal fundus image classifier. Analyze the provided fundus image and produce confidence scores (0.0-1.0) for each of these conditions: ${DISEASES.join(", ")}. Mark a disease as "detected" if confidence > 0.5. Determine an overall severity in {Normal, Mild, Moderate, Severe, Proliferative} and an overall risk percentage 0-100. IMPORTANT: This is for educational/research demonstration only — not medical advice.`;
+    // Provider priority: explicit request → AI_PROVIDER env → "lovable"
+    const provider = (requestedProvider || Deno.env.get("AI_PROVIDER") || "lovable").toLowerCase();
 
-    const userPrompt = `Analyze this retinal fundus image and return a JSON object with this exact schema:
-{
-  "predictions": [
-${DISEASES.map((d) => `    {"disease": "${d}", "confidence": number, "detected": boolean}`).join(",\n")}
-  ],
-  "severity": "Normal" | "Mild" | "Moderate" | "Severe" | "Proliferative",
-  "overallRisk": number,
-  "notes": "brief clinical observation"
-}
-Return ONLY valid JSON, no markdown.`;
+    // Try the chosen provider, fall back to lovable if it fails
+    let attempt = await runProvider(provider, dataUrl, mimeType || "image/jpeg").catch((e) => ({
+      ok: false,
+      status: 500,
+      content: e?.message || "provider error",
+      providerUsed: provider,
+    }));
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: systemPrompt },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: userPrompt },
-              { type: "image_url", image_url: { url: dataUrl } },
-            ],
-          },
-        ],
-        response_format: { type: "json_object" },
-      }),
-    });
+    if (!attempt.ok && provider !== "lovable") {
+      console.warn(`Provider ${provider} failed (${attempt.status}). Falling back to Lovable AI.`);
+      attempt = await runProvider("lovable", dataUrl, mimeType || "image/jpeg").catch((e) => ({
+        ok: false,
+        status: 500,
+        content: e?.message || "lovable fallback error",
+        providerUsed: "lovable",
+      }));
+    }
 
-    if (!response.ok) {
-      const text = await response.text();
-      if (response.status === 429) {
+    if (!attempt.ok) {
+      if (attempt.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again shortly." }), {
           status: 429,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted. Please add credits to your Lovable workspace." }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      if (attempt.status === 402) {
+        return new Response(
+          JSON.stringify({ error: "AI credits exhausted. Please add credits to your Lovable workspace." }),
+          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
       }
-      return new Response(JSON.stringify({ error: `AI gateway error: ${response.status} - ${text}` }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ error: `AI provider error (${attempt.providerUsed}): ${attempt.status} - ${attempt.content.slice(0, 500)}` }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content ?? "{}";
     let parsed: any;
     try {
-      parsed = JSON.parse(content);
+      parsed = JSON.parse(attempt.content);
     } catch {
-      const match = content.match(/\{[\s\S]*\}/);
+      const match = attempt.content.match(/\{[\s\S]*\}/);
       parsed = match ? JSON.parse(match[0]) : {};
     }
 
-    // Normalize / sanitize
     const predictions: DiseasePrediction[] = DISEASES.map((name) => {
-      const p = (parsed.predictions || []).find((x: any) =>
-        (x.disease || "").toLowerCase().includes(name.toLowerCase().split(" ")[0])
-      ) || (parsed.predictions || []).find((x: any) =>
-        (x.disease || "").toLowerCase() === name.toLowerCase()
-      );
+      const p =
+        (parsed.predictions || []).find((x: any) =>
+          (x.disease || "").toLowerCase().includes(name.toLowerCase().split(" ")[0]),
+        ) ||
+        (parsed.predictions || []).find(
+          (x: any) => (x.disease || "").toLowerCase() === name.toLowerCase(),
+        );
       const confidence = Math.max(0, Math.min(1, Number(p?.confidence ?? 0)));
       return {
         disease: name,
@@ -127,7 +281,13 @@ Return ONLY valid JSON, no markdown.`;
     const validSeverities = ["Normal", "Mild", "Moderate", "Severe", "Proliferative"];
     const severity = validSeverities.includes(parsed.severity) ? parsed.severity : "Normal";
     const overallRisk = Math.round(
-      Math.max(0, Math.min(100, Number(parsed.overallRisk ?? Math.max(...predictions.map((p) => p.confidence)) * 100)))
+      Math.max(
+        0,
+        Math.min(
+          100,
+          Number(parsed.overallRisk ?? Math.max(...predictions.map((p) => p.confidence)) * 100),
+        ),
+      ),
     );
 
     const result = {
@@ -138,6 +298,7 @@ Return ONLY valid JSON, no markdown.`;
       severity,
       overallRisk,
       notes: parsed.notes || "",
+      providerUsed: attempt.providerUsed,
     };
 
     return new Response(JSON.stringify(result), {
