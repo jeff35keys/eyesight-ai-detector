@@ -1,8 +1,9 @@
-import { Link, useLocation } from 'react-router-dom';
-import { Eye, Menu, X } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Eye, Menu, X, LogOut, LogIn } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/useAuth';
 
 const links = [
   { to: '/', label: 'Home' },
@@ -15,6 +16,13 @@ const links = [
 export function Navbar() {
   const [open, setOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, signOut } = useAuth();
+
+  const handleLogout = async () => {
+    await signOut();
+    navigate('/');
+  };
 
   return (
     <nav className="sticky top-0 z-50 glass-card border-b">
@@ -41,6 +49,15 @@ export function Navbar() {
               {l.label}
             </Link>
           ))}
+          {user ? (
+            <Button variant="ghost" size="sm" onClick={handleLogout} className="ml-2">
+              <LogOut className="w-4 h-4 mr-2" /> Sign Out
+            </Button>
+          ) : (
+            <Button asChild size="sm" className="ml-2 gradient-medical text-primary-foreground">
+              <Link to="/auth"><LogIn className="w-4 h-4 mr-2" /> Sign In</Link>
+            </Button>
+          )}
         </div>
 
         <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setOpen(!open)}>
@@ -63,6 +80,18 @@ export function Navbar() {
               {l.label}
             </Link>
           ))}
+          {user ? (
+            <button
+              onClick={() => { setOpen(false); handleLogout(); }}
+              className="w-full text-left block px-3 py-2 rounded-md text-sm font-medium text-muted-foreground"
+            >
+              Sign Out
+            </button>
+          ) : (
+            <Link to="/auth" onClick={() => setOpen(false)} className="block px-3 py-2 rounded-md text-sm font-medium text-primary">
+              Sign In / Register
+            </Link>
+          )}
         </div>
       )}
     </nav>
