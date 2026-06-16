@@ -22,10 +22,10 @@ export default function Dashboard() {
   const [history, setHistory] = useState<PredictionResult[]>([]);
   const { toast } = useToast();
 
-  useEffect(() => setHistory(getHistory()), []);
+  useEffect(() => { getHistory().then(setHistory); }, []);
 
-  const handleClear = () => {
-    clearHistory();
+  const handleClear = async () => {
+    await clearHistory();
     setHistory([]);
     toast({ title: 'History Cleared' });
   };
