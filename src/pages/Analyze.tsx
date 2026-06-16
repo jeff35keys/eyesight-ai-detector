@@ -25,7 +25,7 @@ export default function Analyze() {
     try {
       const res = await analyzeImage(file);
       if (preview) res.imageData = preview;
-      saveResult(res);
+      await saveResult(res);
       setResult(res);
       toast({ title: 'Analysis Complete', description: `Severity: ${res.severity} | Risk: ${res.overallRisk}%` });
     } catch (e: any) {
