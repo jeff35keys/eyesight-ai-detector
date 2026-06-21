@@ -39,17 +39,25 @@ interface ProviderCfg {
   url: string;
   model: string;
   key: string;
+  authHeader?: string;
   extraHeaders?: Record<string, string>;
 }
 
 async function callOpenAICompatible(cfg: ProviderCfg, dataUrl: string) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(cfg.extraHeaders || {}),
+  };
+
+  if (cfg.authHeader) {
+    headers[cfg.authHeader] = cfg.key;
+  } else {
+    headers["Authorization"] = `Bearer ${cfg.key}`;
+  }
+
   const res = await fetch(cfg.url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${cfg.key}`,
-      "Content-Type": "application/json",
-      ...(cfg.extraHeaders || {}),
-    },
+    headers,
     body: JSON.stringify({
       model: cfg.model,
       messages: [
