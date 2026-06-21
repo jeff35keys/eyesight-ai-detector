@@ -178,6 +178,10 @@ async function runProvider(
           url: "https://ai.gateway.lovable.dev/v1/chat/completions",
           model: "google/gemini-2.5-flash",
           key: lovableKey,
+          authHeader: "Lovable-API-Key",
+          extraHeaders: {
+            "X-Lovable-AIG-SDK": "vercel-ai-sdk",
+          },
         },
         dataUrl,
       );
